@@ -1,0 +1,12 @@
+[listen]
+    addr = 0.0.0.0
+    port = 10040
+    max_accept = 10
+    keepalive_interval = 1000
+    reuse_time = 5
+    
+
+[host]
+    name = server1
+    addr = 127.0.0.1
+    port = 20040
