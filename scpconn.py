@@ -1,3 +1,4 @@
+import threading
 from threading import Timer
 from configparser import ConfigParser
 config = ConfigParser()
@@ -11,6 +12,7 @@ class ScpSever():
         self.conn = conn
         self.closed = False
         self.connerr = None
+        self.condition = threading.Condition()
         
     def read(self,size):
         conn, err = self.acquire_conn()
@@ -26,16 +28,20 @@ class ScpSever():
         self.conn.write(data)
     
     def close(self):
+        if self.closed:
+            return self.connerr
         self.conn.close()
         self.closed = True
         self.connerr = error
+        self.condition.acquire()
+        self.condition.notify()
+        self.condition.wait()
 
     #超时计数
     def _star_wait(self):
         reuse_timeout = int(config['listen']['reuse_time'])
         time_task = Timer(reuse_timeout,self.close)
         time_task.start()
-        time_task.join()
 
     def acquire_conn(self):
         while True:
@@ -43,6 +49,8 @@ class ScpSever():
                 return None, self.connerr
             elif self.connerr:
                 self._star_wait()
+                self.condition.acquire()
+                self.condition.wait()
             else:
                 return self.conn, None
 

@@ -1,3 +1,4 @@
+import sys
 import gevent
 from gevent import monkey,socket
 monkey.patch_all()
@@ -32,6 +33,5 @@ class Upstream():
         
     
     def close(self):
-        self.conn.shutdown(socket.SHUT_RDWR)
         self.conn.close()
         print(__file__, sys._getframe().f_lineno, "conn close")

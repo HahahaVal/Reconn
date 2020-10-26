@@ -4,9 +4,11 @@ import struct
 import dh64
 import serialization
 import sys
+from gevent.lock import Semaphore
 from common import ErrCode
 from Crypto.Cipher import ARC4
 
+error = "conn close"
 class CipherReader():
     def __init__(self, cipher, conn):
         self.cipher = cipher
@@ -15,6 +17,8 @@ class CipherReader():
     def read(self,size):
         try:
             data = self.rd.recv(size)
+            if len(data)==0:
+                return '', error
             decrypt_data = self.cipher.decrypt(data)
             self.count += size
             return decrypt_data, None
@@ -48,6 +52,7 @@ class Scon(object):
         self.reuse = False
         self.handshakes = 0
         self.id = 0
+        self.sem = Semaphore(1)
 
     def get_id(self):
         return self.id
@@ -166,6 +171,8 @@ class Scon(object):
         return True
 
     def hand_shake(self):
+        self.sem.acquire()
+        
         data = self._read_record()
         sq = messages.ServerReq()
         q = sq.unmarshal(data)
@@ -176,6 +183,7 @@ class Scon(object):
         else:
             print(__file__, sys._getframe().f_lineno, "hand_shake error")
             return False
+        self.sem.release()
 
     
     def is_reused(self):

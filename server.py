@@ -21,11 +21,13 @@ class ConnPair():
     def _pump(self,id,tag,dst,src):
         while True:
             data, err = src.read(common.NetBufferSize)
-            #len(data) == 0 则视为client主动关闭连接
             if len(data) > 0 :
                 err = dst.write(data)
+                if err:
+                    break
             if err:
                 break
+           
         src.close()
         dst.close()
                 
@@ -60,10 +62,6 @@ class Server():
         return True
 
     def _handle_conn(self,rd_socket):
-        keepalive_interval = int(config['listen']['keepalive_interval'])
-        rd_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        rd_socket.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, keepalive_interval)
-
         conn_obj = conn.Scon(self,rd_socket)
         ret = conn_obj.hand_shake()
         if not ret:
@@ -81,6 +79,7 @@ class Server():
         addr = str(config['listen']['addr'])
         port = int(config['listen']['port'])
         max_accept = int(config['listen']['max_accept'])
+        timeout = int(config['listen']['timeout'])
         
         listen_socket = socket.socket()
         address = (addr,port)
@@ -96,6 +95,7 @@ class Server():
         while True:
             try:
                 rd_socket, addr = listen_socket.accept()
+                rd_socket.settimeout(timeout)
                 print(__file__, sys._getframe().f_lineno, "new connect fd:%d, addr:%s"%(rd_socket.fileno(),addr))
                 gevent.spawn(self._handle_conn,rd_socket)
             except:
