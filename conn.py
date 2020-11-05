@@ -7,6 +7,7 @@ import sys
 from gevent.lock import Semaphore
 from common import ErrCode
 from Crypto.Cipher import ARC4
+import traceback
 
 error = "conn close"
 class CipherReader():
@@ -134,7 +135,7 @@ class Scon(object):
         return True
     
     def _spawn(self,new):
-        self.close()
+        self.freeze()
         new.id = self.id
         new.secret = self.secret
         new.reader = self.deepcopy_cipherreader(self.reader)
@@ -143,26 +144,31 @@ class Scon(object):
 
 
     def _reuse_handshake(self,conn_req):
+        diff = 0
         resp = messages.ReuseConnResp()
-        old_conn = self.server.query_by_id(conn_req.id)
-        if not old_conn:
-            resp.code = ErrCode['SCPStatusIDNotFound']
-            return False
-        if not conn_req.verify_sum(old_conn.secret):
-            resp.code = ErrCode['SCPStatusUnauthorized']
-            return False
-        if old_conn.handshakes >= conn_req.handshakes:
-            resp.code = ErrCode['SCPStatusExpired']
-            return False 
-        self.handshakes = conn_req.handshakes
 
-        #all check pass, spawn new conn
-        old_conn._spawn(self)
-        diff = self.writer.count - conn_req.received
-        if diff < 0:
-            resp.code = ErrCode['SCPStatusNotAcceptable']
-            return False
-        resp.received = self.reader.count
+        while True:
+            pair = self.server.query_by_id(conn_req.id)
+            old_conn = pair.remote_conn.conn
+            if not old_conn:
+                resp.code = ErrCode['SCPStatusIDNotFound']
+                break
+            if not conn_req.verify_sum(old_conn.secret):
+                resp.code = ErrCode['SCPStatusUnauthorized']
+                break
+            if old_conn.handshakes >= conn_req.handshakes:
+                resp.code = ErrCode['SCPStatusExpired']
+                break
+            self.handshakes = conn_req.handshakes
+            #all check pass, spawn new conn
+            old_conn._spawn(self)
+            diff = self.writer.count - conn_req.received
+            if diff < 0 :
+                resp.code = ErrCode['SCPStatusNotAcceptable']
+                break
+            resp.received = self.reader.count
+            break
+
         data = resp.marshal()
         self._write_record(data)
         if diff > 0:
@@ -193,8 +199,17 @@ class Scon(object):
         return self.reader.read(size)
         
     def write(self,data):
-        self.writer.write(data)
+        return self.writer.write(data)
 
+    
+    #Close closes raw conn and releases all resources. After close, c can't be reused.
     def close(self):
+        traceback.print_stack()
         self.conn.close()
-        print(__file__, sys._getframe().f_lineno, "conn close")
+        print(__file__, sys._getframe().f_lineno, "remote conn close")
+    
+    #Freeze make conn frozen, and wait for resue
+    def freeze(self):
+        traceback.print_stack()
+        self.conn.close()
+        print(__file__, sys._getframe().f_lineno, "remote conn freeze")

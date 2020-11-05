@@ -34,4 +34,4 @@ class Upstream():
     
     def close(self):
         self.conn.close()
-        print(__file__, sys._getframe().f_lineno, "conn close")
+        print(__file__, sys._getframe().f_lineno, "local conn close")

@@ -1,5 +1,7 @@
 import threading
 from threading import Timer
+import gevent
+from gevent.lock import Semaphore
 from configparser import ConfigParser
 config = ConfigParser()
 config.read('conf')
@@ -12,20 +14,30 @@ class ScpSever():
         self.conn = conn
         self.closed = False
         self.connerr = None
-        self.condition = threading.Condition()
+        self.sem = Semaphore(1)
         
     def read(self,size):
         conn, err = self.acquire_conn()
-        if err:
+        if err: #conn is closed
             return '',err
         data,err = conn.read(size)
         if err:
+            #freeze, waiting for reuse
+            conn.freeze()
             self.connerr = err
         return data, None
 
 
     def write(self,data):
-        self.conn.write(data)
+        conn, err = self.acquire_conn()
+        if err: #conn is closed
+            return '',err
+        err = self.conn.write(data)
+        if err:
+            #freeze, waiting for reuse
+            conn.freeze()
+            self.connerr = err
+        return None
     
     def close(self):
         if self.closed:
@@ -33,9 +45,7 @@ class ScpSever():
         self.conn.close()
         self.closed = True
         self.connerr = error
-        self.condition.acquire()
-        self.condition.notify()
-        self.condition.wait()
+        self.sem.release()
 
     #超时计数
     def _star_wait(self):
@@ -49,8 +59,17 @@ class ScpSever():
                 return None, self.connerr
             elif self.connerr:
                 self._star_wait()
-                self.condition.acquire()
-                self.condition.wait()
+                self.sem.acquire()
             else:
                 return self.conn, None
 
+    def replace_conn(self, conn):
+        if self.closed:
+            return False
+        #close old conn
+        self.conn.close()
+        self.conn = conn
+        self.connerr = None
+      
+        return True
+        

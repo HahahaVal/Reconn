@@ -46,9 +46,18 @@ class Server():
 
     def query_by_id(self,id):
         pair = self.conn_pairs[id]
-        return pair.remote_conn.conn
+        return pair
 
     def _on_reuse_conn(self,conn_obj):
+        conn_id = conn_obj.get_id()
+        pair = self.query_by_id(conn_id)
+        if not pair:
+            print(__file__, sys._getframe().f_lineno, "reuse pair not find")
+            return False
+        ret = pair.remote_conn.replace_conn(conn_obj)
+        if not ret:
+            print(__file__, sys._getframe().f_lineno, "replace conn failed")
+            return False
         return True
 
     def _on_new_conn(self,conn_obj):
