@@ -6,6 +6,7 @@ import common
 import sys
 import upstream
 import idallocator
+from gevent.lock import RLock
 from gevent import monkey,socket
 monkey.patch_all()
 
@@ -27,7 +28,7 @@ class ConnPair():
                     break
             if err:
                 break
-           
+
         src.close()
         dst.close()
                 
@@ -40,13 +41,21 @@ class Server():
     def __init__(self):
         self.conn_pairs = {}
         self.id_allocator = idallocator.IDallocator(1)
+        self.conn_pair_mutex = RLock()
 
     def acquire_id(self):
         return self.id_allocator.acquire_id()
 
     def query_by_id(self,id):
+        self.conn_pair_mutex.acquire()
         pair = self.conn_pairs[id]
+        self.conn_pair_mutex.release()
         return pair
+
+    def _add_pair_id(self,conn_id,conn_pair):
+        self.conn_pair_mutex.acquire()
+        self.conn_pairs[conn_id] = conn_pair
+        self.conn_pair_mutex.release()
 
     def _on_reuse_conn(self,conn_obj):
         conn_id = conn_obj.get_id()
@@ -66,7 +75,7 @@ class Server():
         local_conn = upstream.Upstream()
 
         conn_pair = ConnPair(remote_conn,local_conn)
-        self.conn_pairs[conn_id] = conn_pair
+        self._add_pair_id(conn_id, conn_pair) 
         conn_pair.pump()
         return True
 
@@ -80,7 +89,6 @@ class Server():
             ret = self._on_reuse_conn(conn_obj)
         else:
             ret = self._on_new_conn(conn_obj)
-
         if not ret:
             conn_obj.close()
     

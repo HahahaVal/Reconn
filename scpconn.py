@@ -2,11 +2,16 @@ import threading
 from threading import Timer
 import gevent
 from gevent.lock import Semaphore
+from gevent.lock import RLock
+from gevent import monkey,socket
+from goto import with_goto
+monkey.patch_all()
+
 from configparser import ConfigParser
 config = ConfigParser()
 config.read('conf')
 
-error = "conn close"
+error = "scpconn close"
 
 #前端服务
 class ScpSever():
@@ -14,7 +19,8 @@ class ScpSever():
         self.conn = conn
         self.closed = False
         self.connerr = None
-        self.sem = Semaphore(1)
+        self.conn_mutex = RLock()
+        self.conn_cond = Semaphore(0)
         
     def read(self,size):
         conn, err = self.acquire_conn()
@@ -39,37 +45,65 @@ class ScpSever():
             self.connerr = err
         return None
     
+    @with_goto
     def close(self):
+        self.conn_mutex.acquire()
         if self.closed:
-            return self.connerr
+            goto .end
         self.conn.close()
         self.closed = True
         self.connerr = error
-        self.sem.release()
+        label .end
+        self.conn_cond.release()
+        self.conn_mutex.release()
+        return self.connerr
 
     #超时计数
     def _star_wait(self):
         reuse_timeout = int(config['listen']['reuse_time'])
-        time_task = Timer(reuse_timeout,self.close)
-        time_task.start()
+        self.time_task = Timer(reuse_timeout,self.close)
+        self.time_task.start()
+
+    def _stop_wait(self):
+        self.time_task.cancel()
+
+    def _cond_wait(self):
+        self.conn_mutex.release()
+        self.conn_cond.acquire()
+        self.conn_mutex.acquire()
 
     def acquire_conn(self):
+        self.conn_mutex.acquire()
+        conn = None
+        connerr = None
         while True:
             if self.closed:
-                return None, self.connerr
+                connerr = self.connerr
+                break
             elif self.connerr:
                 self._star_wait()
-                self.sem.acquire()
+                self._cond_wait()
+                self._stop_wait()
             else:
-                return self.conn, None
+                conn = self.conn
+                break
+        self.conn_mutex.release()
+        return conn, connerr
 
+    @with_goto
     def replace_conn(self, conn):
+        self.conn_mutex.acquire()
+        ret = False
         if self.closed:
-            return False
+            goto .end
         #close old conn
         self.conn.close()
+        #set new status
         self.conn = conn
         self.connerr = None
-      
-        return True
+        ret = True
+        label .end
+        self.conn_cond.release()
+        self.conn_mutex.release()
+        return ret
         

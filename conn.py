@@ -4,12 +4,11 @@ import struct
 import dh64
 import serialization
 import sys
-from gevent.lock import Semaphore
+from gevent.lock import RLock
 from common import ErrCode
 from Crypto.Cipher import ARC4
 import traceback
 
-error = "conn close"
 class CipherReader():
     def __init__(self, cipher, conn):
         self.cipher = cipher
@@ -19,9 +18,9 @@ class CipherReader():
         try:
             data = self.rd.recv(size)
             if len(data)==0:
-                return '', error
+                return '', "client close"
             decrypt_data = self.cipher.decrypt(data)
-            self.count += size
+            self.count += len(data)
             return decrypt_data, None
         except Exception as err:
             return '', err
@@ -50,10 +49,10 @@ class Scon(object):
     def __init__(self,server,conn):
         self.server = server
         self.conn = conn
-        self.reuse = False
+        self.reused = False
         self.handshakes = 0
         self.id = 0
-        self.sem = Semaphore(1)
+        self.conn_mutex = RLock()
 
     def get_id(self):
         return self.id
@@ -114,7 +113,7 @@ class Scon(object):
 
 
     def _new_handshake(self,conn_req):
-        self.reuse = False
+        self.reused = False
         self.id = self.server.acquire_id()
         print(__file__, sys._getframe().f_lineno, "new handshake id = ",self.id)
 
@@ -135,13 +134,14 @@ class Scon(object):
         return True
     
     def _spawn(self,new):
+        self.conn_mutex.acquire()
         self.freeze()
         new.id = self.id
         new.secret = self.secret
         new.reader = self.deepcopy_cipherreader(self.reader)
         new.writer = self.deepcopy_cipherwriter(self.writer)
-        new.reuse = True
-
+        new.reused = True
+        self.conn_mutex.release()
 
     def _reuse_handshake(self,conn_req):
         diff = 0
@@ -168,7 +168,6 @@ class Scon(object):
                 break
             resp.received = self.reader.count
             break
-
         data = resp.marshal()
         self._write_record(data)
         if diff > 0:
@@ -177,23 +176,23 @@ class Scon(object):
         return True
 
     def hand_shake(self):
-        self.sem.acquire()
-        
+        self.conn_mutex.acquire()
         data = self._read_record()
         sq = messages.ServerReq()
         q = sq.unmarshal(data)
+        ret = False
         if isinstance(q,messages.NewConnReq):
-            return self._new_handshake(q)
+            ret = self._new_handshake(q)
         elif isinstance(q,messages.ReuseConnReq):
-            return self._reuse_handshake(q)
+            ret = self._reuse_handshake(q)
         else:
             print(__file__, sys._getframe().f_lineno, "hand_shake error")
-            return False
-        self.sem.release()
+        self.conn_mutex.release()
+        return ret
 
     
     def is_reused(self):
-        return self.reuse
+        return self.reused
 
     def read(self,size):
         return self.reader.read(size)
@@ -204,12 +203,12 @@ class Scon(object):
     
     #Close closes raw conn and releases all resources. After close, c can't be reused.
     def close(self):
-        traceback.print_stack()
+        # traceback.print_stack()
         self.conn.close()
         print(__file__, sys._getframe().f_lineno, "remote conn close")
     
     #Freeze make conn frozen, and wait for resue
     def freeze(self):
-        traceback.print_stack()
+        # traceback.print_stack()
         self.conn.close()
         print(__file__, sys._getframe().f_lineno, "remote conn freeze")
