@@ -67,6 +67,7 @@ class Server():
         if not ret:
             print(__file__, sys._getframe().f_lineno, "replace conn failed")
             return False
+        print(__file__, sys._getframe().f_lineno, "replace conn success")
         return True
 
     def _on_new_conn(self,conn_obj):

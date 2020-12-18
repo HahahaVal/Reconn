@@ -3,7 +3,7 @@
     port = 10040
     max_accept = 10
     timeout = 100
-    reuse_time = 100
+    reuse_time = 10
     
 
 [host]

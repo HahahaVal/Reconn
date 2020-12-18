@@ -10,10 +10,9 @@ from Crypto.Cipher import ARC4
 import traceback
 
 class CipherReader():
-    def __init__(self, cipher, conn):
+    def __init__(self, cipher):
         self.cipher = cipher
         self.count = 0
-        self.rd = conn
     def read(self,size):
         try:
             data = self.rd.recv(size)
@@ -24,15 +23,15 @@ class CipherReader():
             return decrypt_data, None
         except Exception as err:
             return '', err
-
+    def set_read_conn(self,conn):
+        self.rd = conn
 
 
 class CipherWriter():
-    def __init__(self, cipher, conn):
+    def __init__(self, cipher):
         self.cipher = cipher
         self.count = 0
         self.reuse_buffer = loopbuffer.LoopBuffer()
-        self.wr = conn
     def write(self,data):
         try:
             self.reuse_buffer.write(data)
@@ -42,7 +41,8 @@ class CipherWriter():
             return None
         except Exception as err:
             return err
-            
+    def set_write_conn(self,conn):
+        self.wr = conn
     
 
 class Scon(object):
@@ -52,6 +52,7 @@ class Scon(object):
         self.reused = False
         self.handshakes = 0
         self.id = 0
+        self.frozen = False
         self.conn_mutex = RLock()
 
     def get_id(self):
@@ -62,12 +63,12 @@ class Scon(object):
         return h[:]
     
     def deepcopy_cipherreader(self,old):
-        new = CipherReader(old.cipher,old.rd)
+        new = CipherReader(old.cipher)
         new.count = old.count
         return new
 
     def deepcopy_cipherwriter(self,old):
-        new = CipherWriter(old.cipher,old.wr)
+        new = CipherWriter(old.cipher)
         new.count = old.count
         return new
 
@@ -82,7 +83,10 @@ class Scon(object):
         h = self.gen_rc4_key(secret, serialization.to_byte8(3))
         key[24:32] = h
         rc4 = ARC4.new(bytes(key))
-        return CipherReader(rc4,self.conn)
+
+        cipher_reader = CipherReader(rc4)
+        cipher_reader.set_read_conn(self.conn)
+        return cipher_reader
 
     def _new_conn_writer(self,secret):
         key = bytearray()
@@ -95,7 +99,10 @@ class Scon(object):
         h = self.gen_rc4_key(secret, serialization.to_byte8(3))
         key[24:32] = h
         rc4 = ARC4.new(bytes(key))
-        return CipherWriter(rc4,self.conn)
+
+        cipher_writer = CipherWriter(rc4)
+        cipher_writer.set_write_conn(self.conn)
+        return cipher_writer
 
 
     def _read_record(self):
@@ -140,6 +147,9 @@ class Scon(object):
         new.secret = self.secret
         new.reader = self.deepcopy_cipherreader(self.reader)
         new.writer = self.deepcopy_cipherwriter(self.writer)
+
+        new.reader.set_read_conn(new.conn)
+        new.writer.set_write_conn(new.conn)
         new.reused = True
         self.conn_mutex.release()
 
@@ -204,11 +214,15 @@ class Scon(object):
     #Close closes raw conn and releases all resources. After close, c can't be reused.
     def close(self):
         # traceback.print_stack()
-        self.conn.close()
+        self.freeze()
         print(__file__, sys._getframe().f_lineno, "remote conn close")
     
     #Freeze make conn frozen, and wait for resue
     def freeze(self):
         # traceback.print_stack()
+        if self.frozen:
+            return
+        self.frozen = True
+
         self.conn.close()
         print(__file__, sys._getframe().f_lineno, "remote conn freeze")
