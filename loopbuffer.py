@@ -44,3 +44,4 @@ class LoopBuffer():
         wrapped = n - self.off
         data[0:] = self.buf[capacity-wrapped:]
         data[wrapped:] = self.buf[:self.off]
+        return data

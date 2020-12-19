@@ -20,6 +20,8 @@ class Upstream():
     def read(self,size):
         try:
             data = self.conn.recv(size)
+            if len(data)==0:
+                return '', "server close"
             return data, None
         except Exception as err:
             return '', err

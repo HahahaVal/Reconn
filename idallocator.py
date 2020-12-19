@@ -1,33 +1,31 @@
 import gevent
-from gevent.lock import Semaphore
+from gevent.lock import RLock
 
 
 class IDallocator(object):
     def __init__(self,start):
-        self.sem = Semaphore(1)
+        self.mutex = RLock()
         self.start = start
         self.off = start
         self.free = []
         
 
     def acquire_id(self):
-        self.sem.acquire()
+        self.mutex.acquire()
         if len(self.free) > 0:
-            index = len(self.free) - 1
-            id = self.free.pop(index)
+            id = self.free.pop()
             return id
         id = self.off
         self.off = self.off + 1
-        self.sem.release()
+        self.mutex.release()
         return id
     
     def release_id(self,id):
-        self.sem.acquire()
-        index = len(self.free)
+        self.mutex.acquire()
         self.free.append(id)
         #所有已分配的id都在空闲池中，则重置池和分配器
-        if len(self.free) == (self.off - self.star):
+        if len(self.free) == (self.off - self.start):
             self.off = self.start
             self.free = []
-        self.sem.release()
+        self.mutex.release()
 

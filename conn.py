@@ -7,7 +7,6 @@ import sys
 from gevent.lock import RLock
 from common import ErrCode
 from Crypto.Cipher import ARC4
-import traceback
 
 class CipherReader():
     def __init__(self, cipher):
@@ -109,14 +108,13 @@ class Scon(object):
         size = struct.unpack('>H', self.conn.recv(2))
         size = int(size[0])
         data = self.conn.recv(size)
-        print(__file__, sys._getframe().f_lineno, "_read_record: ",size,type(data),data)
         return data
+
 
     def _write_record(self, data):
         size = struct.pack('>H', len(data))
         self.conn.send(size)
         self.conn.send(data)
-        print(__file__, sys._getframe().f_lineno, "_write_record : ",size,type(data),data)
 
 
     def _new_handshake(self,conn_req):
@@ -213,13 +211,11 @@ class Scon(object):
     
     #Close closes raw conn and releases all resources. After close, c can't be reused.
     def close(self):
-        # traceback.print_stack()
         self.freeze()
         print(__file__, sys._getframe().f_lineno, "remote conn close")
     
     #Freeze make conn frozen, and wait for resue
     def freeze(self):
-        # traceback.print_stack()
         if self.frozen:
             return
         self.frozen = True
